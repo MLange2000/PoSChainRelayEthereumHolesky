@@ -1,3 +1,4 @@
+const HDWalletProvider = require('@truffle/hdwallet-provider');
 /**
  * Use this file to configure your truffle project. It's seeded with some
  * common settings for different networks and features like migrations,
@@ -42,12 +43,15 @@ module.exports = {
     // tab if you use this network and you must also set the `host`, `port` and `network_id`
     // options below to some value.
     //
-    development: {
-    host: "127.0.0.1",     // Localhost (default: none)
-    port: 8545,             // Standard Ethereum port (default: none)
-    //port: 7545, // ganache
-    network_id: "*", 
-    gas: 10003730,  
+    holesky: {
+    provider: () => new HDWalletProvider(
+      "Private-Key-Of-Wallet",
+      "https://rpc.holesky.ethpandaops.io/"
+    ),
+    network_id: "17000", 
+    gas: 30000000,  
+    timeoutBlocks: 200,
+    skipDryRun: true
         // Any network (default: none)
     },
     // Another network with more advanced options...
