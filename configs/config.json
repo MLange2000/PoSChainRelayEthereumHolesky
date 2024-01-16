@@ -1,0 +1,6 @@
+{
+  "ethereumHost": "https://rpc.holesky.ethpandaops.io",
+  "privateKey": "xyz",
+  "contractAddress": "xyz",
+  "batchSize": 15
+}
