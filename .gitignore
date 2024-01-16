@@ -2,3 +2,5 @@ test/generate_data/ssz/venv/
 node_modules/
 installed_contracts
 go-ethereum/
+configs/config.json
+truffle-config.js
