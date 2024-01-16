@@ -4,7 +4,7 @@
 
 pragma solidity >=0.8.0 <0.9.0;
 
-import "bytes/BytesLib.sol";
+import "../node_modules/solidity-bytes-utils/contracts/BytesLib.sol";
 
 // debug settings
 bool constant MOCK_BLS_PRECOMPILE = false;
@@ -107,6 +107,10 @@ contract Eth2ChainRelay_512 {
     
     function getFinalizedStateRoot() public view returns (bytes32) {
         return finalizedStateRoot;
+    }
+
+    function getFinalizedSlot() public view returns (uint64) {
+        return finalizedSlot;
     }
     
     function submitUpdate(ChainRelayUpdate memory _chainRelayUpdate, SyncCommitteeUpdate memory _syncCommitteeUpdate) public returns (bool) {
