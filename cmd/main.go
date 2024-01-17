@@ -17,7 +17,7 @@ func main() {
 		log.Fatalf("Failed to establish connection to Holesky-Testnet: %v", err)
 	}
 
-	contract, err := relays.NewMainCaller(contractaddress, conn)
+	contract, err := relays.NewRelaysCaller(contractaddress, conn)
 	if err != nil {
 		log.Fatalf("Failed to intantiate contract: %v", err)
 	}
