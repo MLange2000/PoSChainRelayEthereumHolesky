@@ -1,32 +1,19 @@
 //old imports without update of lodestar to an esm project
-import { Api, getClient } from '@chainsafe/lodestar-api';
-import { config } from '@chainsafe/lodestar-config/default';
-import { createIBeaconConfig, IBeaconConfig } from '@chainsafe/lodestar-config';
+import { Api, getClient} from '@lodestar/api';
+import { config } from '@lodestar/config/default';
+import { createBeaconConfig, BeaconConfig } from '../node_modules/@lodestar/config/lib/beaconConfig.js';
 import { toHexString } from '@chainsafe/ssz';
-import { DOMAIN_SYNC_COMMITTEE } from '@chainsafe/lodestar-params';
-import { ssz, altair } from '@chainsafe/lodestar-types';
-import { isValidMerkleBranch } from '@chainsafe/lodestar-light-client/lib/utils/verifyMerkleBranch';
-import { computeSyncPeriodAtEpoch, computeSyncPeriodAtSlot } from '@chainsafe/lodestar-light-client/lib/utils/clock';
-import { createNodeFromProof } from '@chainsafe/persistent-merkle-tree';
-import { createSingleProof } from '@chainsafe/persistent-merkle-tree/lib/proof/single';
+import { DOMAIN_SYNC_COMMITTEE } from '@lodestar/params';
+import { ssz, altair } from '@lodestar/types';
+//import { isValidMerkleBranch } from '../node_modules/@chainsafe/lodestar-light-client/lib/utils/verifyMerkleBranch.js';
+import { verifyMerkleBranch } from '@lodestar/utils';
+import { computeSyncPeriodAtEpoch, computeSyncPeriodAtSlot } from '@lodestar/state-transition';
+import { createNodeFromProof, computeDescriptor } from '@chainsafe/persistent-merkle-tree';
+import { createSingleProof } from '../node_modules/@chainsafe/persistent-merkle-tree/lib/proof/single.js';
 import {Tree} from "@chainsafe/persistent-merkle-tree";
 
-//updated imports to avoid neccesary upgrade to esm, because of common.js-project
-// const { type Api } = await import('@chainsafe/lodestar-api');
-// const { getClient } = await import('@chainsafe/lodestar-api');
-// const { config } = await import('@chainsafe/lodestar-config/default');
-// const { createIBeaconConfig, IBeaconConfig } = await import('@chainsafe/lodestar-config');
-// const { toHexString } = await import('@chainsafe/ssz');
-// const { DOMAIN_SYNC_COMMITTEE } = await import('@chainsafe/lodestar-params');
-// const { ssz, altair } =  await import('@chainsafe/lodestar-types');
-// const { isValidMerkleBranch } = await import('@chainsafe/lodestar-light-client/lib/utils/verifyMerkleBranch');
-// const { computeSyncPeriodAtEpoch, computeSyncPeriodAtSlot } = await import('@chainsafe/lodestar-light-client/lib/utils/clock');
-// const { createNodeFromProof } = await import('@chainsafe/persistent-merkle-tree');
-// const { createSingleProof } = await import('@chainsafe/persistent-merkle-tree/lib/proof/single');
-// const {Tree} = await import('@chainsafe/persistent-merkle-tree');
-
-import { ChainRelayUpdate } from './types';
-import { logger } from './utils/logger';
+import { ChainRelayUpdate} from './types.js';
+import { logger } from './utils/logger.js';
 
 export default class BeaconChainClient {
     clientNode: Api;
@@ -66,33 +53,33 @@ export default class BeaconChainClient {
       
         return booleanArray;
     }
-
+    
     public getCommitteeUpdateData = async (
         _syncCommitteePeriod: number,
     ): Promise<ChainRelayUpdate> => {
-        const [prevCommitteeUpdate, committeeUpdate] = (await this.clientNode.lightclient.getCommitteeUpdates(_syncCommitteePeriod - 1, _syncCommitteePeriod)).data;
-        const finalizedBlockHeader = committeeUpdate.attestedHeader;
-        const finalizedSlot = finalizedBlockHeader.slot;
-        const finalizedStateRoot = finalizedBlockHeader.stateRoot;
-        const finalizedBlockRoot = (await this.clientNode.beacon.getBlockRoot(finalizedSlot)).data;
-        logger.info('finalized slot: ', committeeUpdate.attestedHeader.slot);
-        logger.info('finalizing slot: ', committeeUpdate.finalizedHeader.slot);
+        logger.debug('Moin! A getCommitee Update started...');
+        const [prevCommitteeUpdate, committeeUpdate] = (await this.clientNode.lightclient.getUpdates(_syncCommitteePeriod - 1, 2)).response!
+        //logger.debug('finalized slot: ', prevCommitteeUpdate.data);
+        const finalizedBlockHeader = committeeUpdate.data.attestedHeader;
+        const finalizedSlot = finalizedBlockHeader.beacon.slot;
+        const finalizedStateRoot = finalizedBlockHeader.beacon.stateRoot;
+        const finalizedBlockRoot = (await this.clientNode.beacon.getBlockRoot(finalizedSlot)).response!;
 
-        const latestBlockHeader = committeeUpdate.finalizedHeader;
-        const latestSlot = latestBlockHeader.slot;
-        const latestBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(latestBlockHeader);
-        const latestStateRoot = latestBlockHeader.stateRoot;
+        const latestBlockHeader = committeeUpdate.data.finalizedHeader;
+        const latestSlot = latestBlockHeader.beacon.slot;
+        const latestBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(latestBlockHeader.beacon);
+        const latestStateRoot = latestBlockHeader.beacon.stateRoot;
 
-        const { nextSyncCommitteeBranch } = committeeUpdate;
-        const { nextSyncCommittee } = committeeUpdate;
+        const { nextSyncCommitteeBranch } = committeeUpdate.data;
+        const { nextSyncCommittee } = committeeUpdate.data;
 
         
         logger.debug('latest block root: ', toHexString(latestBlockRoot));
-        const stateRootBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(latestBlockHeader)).getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
-
-        logger.debug(
+        //const stateRootBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(latestBlockHeader.beacon)).getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
+        const stateRootBranch = new Tree(ssz.phase0.BeaconBlockHeader.toView(latestBlockHeader.beacon).node).getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
+        logger.info(
             'stateRootBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 latestStateRoot.valueOf() as Uint8Array,
                 stateRootBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.STATE_ROOT_INDEX),
@@ -100,12 +87,13 @@ export default class BeaconChainClient {
             ),
         );
 
-        const latestSlotBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(latestBlockHeader)).getSingleProof(BigInt(BeaconChainClient.SLOT_INDEX));
-        // logger.info('latestSlotBranch: ', latestSlotBranch.map(toHexString));
+        //const latestSlotBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(latestBlockHeader.beacon)).getSingleProof(BigInt(BeaconChainClient.SLOT_INDEX));
+        const latestSlotBranch = new Tree(ssz.phase0.BeaconBlockHeader.toView(latestBlockHeader.beacon).node).getSingleProof(BigInt(BeaconChainClient.SLOT_INDEX));
+        logger.debug('latestSlotBranch: ', latestSlotBranch.map(toHexString));
 
-        logger.debug(
+        logger.info(
             'latestSlotBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 ssz.Slot.hashTreeRoot(latestSlot),
                 latestSlotBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.SLOT_INDEX),
@@ -113,35 +101,39 @@ export default class BeaconChainClient {
             ),
         );
 
-        const finalizedStateRootBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(finalizedBlockHeader)).getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
-        // logger.info('finalizedStateRootBranch: ', finalizedStateRootBranch.map(toHexString));
+        //const finalizedStateRootBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(finalizedBlockHeader.beacon)).getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
+        const finalizedStateRootBranch = new Tree(ssz.phase0.BeaconBlockHeader.toView(finalizedBlockHeader.beacon).node).getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
+        
+        logger.debug('finalizedStateRootBranch: ', finalizedStateRootBranch.map(toHexString));
 
-        logger.debug(
+        logger.info(
             'finalizedStateRootBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 finalizedStateRoot.valueOf() as Uint8Array,
                 finalizedStateRootBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.STATE_ROOT_INDEX),
-                finalizedBlockRoot.valueOf() as Uint8Array,
+                finalizedBlockRoot.data.root.valueOf() as Uint8Array,
             ),
         );
 
-        const finalizedSlotBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(finalizedBlockHeader)).getSingleProof(BigInt(BeaconChainClient.SLOT_INDEX));
-        // logger.info('finalizedSlotBranch: ', finalizedSlotBranch.map(toHexString));
+        //const finalizedSlotBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(finalizedBlockHeader.beacon)).getSingleProof(BigInt(BeaconChainClient.SLOT_INDEX));
+        const finalizedSlotBranch = new Tree(ssz.phase0.BeaconBlockHeader.toView(finalizedBlockHeader.beacon).node).getSingleProof(BigInt(BeaconChainClient.SLOT_INDEX));
+        logger.debug('finalizedSlotBranch: ', finalizedSlotBranch.map(toHexString));
 
-        logger.debug(
+        logger.info(
             'finalizedSlotBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 ssz.Slot.hashTreeRoot(finalizedSlot),
                 finalizedSlotBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.SLOT_INDEX),
-                finalizedBlockRoot.valueOf() as Uint8Array,
+                finalizedBlockRoot.data.root.valueOf() as Uint8Array,
             ),
         );
+        
 
         logger.debug(
             'nextSyncCommitteeBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 ssz.altair.SyncCommittee.hashTreeRoot(nextSyncCommittee),
                 Array.from(nextSyncCommitteeBranch).map((val) => val.valueOf() as Uint8Array),
                 ...BeaconChainClient.fromGindex(BeaconChainClient.NEXT_SYNC_COMMITTEE_INDEX),
@@ -151,26 +143,26 @@ export default class BeaconChainClient {
 
         logger.debug(
             'finalizingBranch valid: ',
-            isValidMerkleBranch(
-                finalizedBlockRoot.valueOf() as Uint8Array,
-                Array.from(committeeUpdate.finalityBranch).map((val) => val.valueOf() as Uint8Array),
+            verifyMerkleBranch(
+                finalizedBlockRoot.data.root.valueOf() as Uint8Array,
+                Array.from(committeeUpdate.data.finalityBranch).map((val) => val.valueOf() as Uint8Array),
                 ...BeaconChainClient.fromGindex(BeaconChainClient.FINALIZED_ROOT_INDEX),
                 latestStateRoot.valueOf() as Uint8Array,
             ),
         );
 
         logger.debug('state root: ', toHexString(latestStateRoot));
-        logger.debug('body root: ', toHexString(latestBlockHeader.bodyRoot));
+        logger.debug('body root: ', toHexString(latestBlockHeader.beacon.bodyRoot));
 
         logger.debug('finalized block state root: ', toHexString(finalizedStateRoot));
 
-        const { genesisValidatorsRoot } = (await this.clientNode.beacon.getGenesis()).data;
-        const beaconConfig: IBeaconConfig = createIBeaconConfig(config, genesisValidatorsRoot);
-        const domain = beaconConfig.getDomain(DOMAIN_SYNC_COMMITTEE, latestSlot);
+        const { genesisValidatorsRoot } = (await this.clientNode.beacon.getGenesis()).response!.data;
+        const beaconConfig: BeaconConfig = createBeaconConfig(config, genesisValidatorsRoot);
+        const domain = beaconConfig.getDomain(latestSlot,DOMAIN_SYNC_COMMITTEE);
 
-        const syncCommittee = prevCommitteeUpdate.nextSyncCommittee.pubkeys;
-        const syncCommitteeBranch = prevCommitteeUpdate.nextSyncCommitteeBranch;
-        const syncCommitteeAggregate = prevCommitteeUpdate.nextSyncCommittee.aggregatePubkey;
+        const syncCommittee = prevCommitteeUpdate.data.nextSyncCommittee.pubkeys;
+        const syncCommitteeBranch = prevCommitteeUpdate.data.nextSyncCommitteeBranch;
+        const syncCommitteeAggregate = prevCommitteeUpdate.data.nextSyncCommittee.aggregatePubkey;
 
         // const { BeaconState } = beaconConfig.getForkTypes(latestSlot);
         // const path = ['blockRoots'];
@@ -178,19 +170,19 @@ export default class BeaconChainClient {
         // logger.debug('gindex: ', gindex);
         // const proof = (await this.clientNode.lightclient.getStateProof('head',[path])).data;
         // const [history, historyBranch] = createSingleProof(createNodeFromProof(proof), gindex);
-        // logger.info('history root: ', toHexString(history));
+        // logger.debug('history root: ', toHexString(history));
             
         return {
-            signature: toHexString(committeeUpdate.syncAggregate.syncCommitteeSignature),
-            participants: BeaconChainClient.uint8ArrayToBooleanArray(committeeUpdate.syncAggregate.syncCommitteeBits.uint8Array),
+            signature: toHexString(committeeUpdate.data.syncAggregate.syncCommitteeSignature),
+            participants: BeaconChainClient.uint8ArrayToBooleanArray(committeeUpdate.data.syncAggregate.syncCommitteeBits.uint8Array),
             latestBlockRoot: toHexString(latestBlockRoot),
             signingDomain: toHexString(domain),
             stateRoot: toHexString(latestStateRoot),
             stateRootBranch: stateRootBranch.map(toHexString),
             latestSlot,
             latestSlotBranch: latestSlotBranch.map(toHexString),
-            finalizedBlockRoot: toHexString(finalizedBlockRoot),
-            finalizingBranch: Array.from(committeeUpdate.finalityBranch).map(toHexString),
+            finalizedBlockRoot: toHexString(finalizedBlockRoot.data.root),
+            finalizingBranch: Array.from(committeeUpdate.data.finalityBranch).map(toHexString),
             finalizedSlot,
             finalizedSlotBranch: finalizedSlotBranch.map(toHexString),
             finalizedStateRoot: toHexString(finalizedStateRoot),
@@ -204,8 +196,8 @@ export default class BeaconChainClient {
     public getBlockUpdateDataForEpoch = async (
         _epoch: number,
     ): Promise<ChainRelayUpdate> => {
-        const { genesisValidatorsRoot } = (await this.clientNode.beacon.getGenesis()).data;
-        const beaconConfig: IBeaconConfig = createIBeaconConfig(config, genesisValidatorsRoot);
+        const { genesisValidatorsRoot } = (await this.clientNode.beacon.getGenesis()).response!.data;
+        const beaconConfig: BeaconConfig = createBeaconConfig(config, genesisValidatorsRoot);
 
         const finalizedSlot = BeaconChainClient.SLOTS_PER_EPOCH * _epoch;
 
@@ -213,7 +205,7 @@ export default class BeaconChainClient {
         // the earliest finalization block appears after two epochs
         const latestSlot = finalizedSlot + BeaconChainClient.SLOTS_PER_EPOCH * 2;
 
-        const signedLatestBlockHeader = (await this.clientNode.beacon.getBlockHeader(latestSlot)).data.header;
+        const signedLatestBlockHeader = (await this.clientNode.beacon.getBlockHeader(latestSlot)).response!.data.header;
         const latestBlockHeader = signedLatestBlockHeader.message;
         //const stateRootBranch = ssz.phase0.BeaconBlockHeader.createTreeBackedFromStruct(latestBlockHeader).tree.getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
         const stateRootBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(latestBlockHeader)).getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
@@ -221,12 +213,12 @@ export default class BeaconChainClient {
         const latestBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(latestBlockHeader);
 
         const { BeaconState } = beaconConfig.getForkTypes(latestSlot);
-        const domain = beaconConfig.getDomain(DOMAIN_SYNC_COMMITTEE, latestSlot);
+        const domain = beaconConfig.getDomain(latestSlot, DOMAIN_SYNC_COMMITTEE);
 
         // const proof = (await this.clientNode.lightclient.getStateProof(toHexString(latestStateRoot), [['finalized_checkpoint']]));
-        logger.info(
+        logger.debug(
             'stateRootBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 latestStateRoot.valueOf() as Uint8Array,
                 stateRootBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.STATE_ROOT_INDEX),
@@ -235,23 +227,24 @@ export default class BeaconChainClient {
         );
 
         const latestSlotBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(latestBlockHeader)).getSingleProof(BigInt(BeaconChainClient.SLOT_INDEX));
-        logger.info(
+        logger.debug(
             'latestSlotBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 ssz.Slot.hashTreeRoot(latestSlot),
                 latestSlotBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.SLOT_INDEX),
                 latestBlockRoot.valueOf() as Uint8Array,
             ),
         );
-
+        const FINALIZED_STATE_ROOT_GINDEX = ssz.capella.BeaconBlock.getPathInfo(['finalizedCheckpoint', 'root']).gindex;
+        const descriptor = computeDescriptor([FINALIZED_STATE_ROOT_GINDEX]); //here eventually indexes from above to bigin
         let path = ['finalizedCheckpoint', 'root'];
-        const finalityProof = (await this.clientNode.lightclient.getStateProof(toHexString(latestStateRoot), [path])).data;
+        const finalityProof = (await this.clientNode.proof.getStateProof(toHexString(latestStateRoot), descriptor)).response!.data; //here eventually indexes from above to bigin
         const [finalizedBlockRoot, finalityBranch] = createSingleProof(createNodeFromProof(finalityProof), BigInt(BeaconChainClient.FINALIZED_ROOT_INDEX));
 
-        logger.info(
+        logger.debug(
             'finalizingBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 finalizedBlockRoot.valueOf() as Uint8Array,
                 finalityBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.FINALIZED_ROOT_INDEX),
@@ -259,17 +252,17 @@ export default class BeaconChainClient {
             ),
         );
 
-        logger.info('computed finalizedBlockRoot: ', toHexString((await this.clientNode.beacon.getBlockRoot(finalizedSlot)).data));
-        logger.info('actual finalizedBlockRoot: ', toHexString(finalizedBlockRoot));
-        const finalizedBlockHeader = (await this.clientNode.beacon.getBlockHeader(toHexString(finalizedBlockRoot))).data.header.message;
+        logger.debug('computed finalizedBlockRoot: ', toHexString((await this.clientNode.beacon.getBlockRoot(finalizedSlot)).response!.data.root));
+        logger.debug('actual finalizedBlockRoot: ', toHexString(finalizedBlockRoot));
+        const finalizedBlockHeader = (await this.clientNode.beacon.getBlockHeader(toHexString(finalizedBlockRoot))).response!.data.header.message;
         const finalizedStateRoot = finalizedBlockHeader.stateRoot;
         // const finalizedSlot = finalizedBlockHeader.slot;
         const finalizedStateRootBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(finalizedBlockHeader)).getSingleProof(BigInt(BeaconChainClient.STATE_ROOT_INDEX));
-        logger.info('finalizedStateRoot: ', toHexString(finalizedStateRoot));
+        logger.debug('finalizedStateRoot: ', toHexString(finalizedStateRoot));
 
-        logger.info(
+        logger.debug(
             'finalizedStateRootBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 finalizedStateRoot.valueOf() as Uint8Array,
                 finalizedStateRootBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.STATE_ROOT_INDEX),
@@ -278,11 +271,11 @@ export default class BeaconChainClient {
         );
 
         const finalizedSlotBranch = new Tree(ssz.phase0.BeaconBlockHeader.value_toTree(finalizedBlockHeader)).getSingleProof(BigInt(BeaconChainClient.SLOT_INDEX));
-        // logger.info('finalizedSlotBranch: ', finalizedSlotBranch.map(toHexString));
+        // logger.debug('finalizedSlotBranch: ', finalizedSlotBranch.map(toHexString));
 
-        logger.info(
+        logger.debug(
             'finalizedSlotBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 ssz.Slot.hashTreeRoot(finalizedSlot),
                 finalizedSlotBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.SLOT_INDEX),
@@ -294,21 +287,23 @@ export default class BeaconChainClient {
         const { gindex } = BeaconState.getPathInfo(path);
         logger.debug('gindex: ', gindex);
 
-        logger.info('finalized slot: ', finalizedSlot);
-        logger.info('finalizedStateRoot: ', toHexString(finalizedStateRoot));
-        const nextSyncCommitteeProof = (await this.clientNode.lightclient.getStateProof(toHexString(finalizedStateRoot), [path])).data;
+        logger.debug('finalized slot: ', finalizedSlot);
+        logger.debug('finalizedStateRoot: ', toHexString(finalizedStateRoot));
+        const NEXT_SYNC_COMMITTEE_GINDEX = ssz.capella.BeaconBlock.getPathInfo(['nextSyncCommittee']).gindex;
+        const descriptor_syn_commitee = computeDescriptor([NEXT_SYNC_COMMITTEE_GINDEX]); //here eventually indexes from above to bigint
+        const nextSyncCommitteeProof = (await this.clientNode.proof.getStateProof(toHexString(finalizedStateRoot), descriptor_syn_commitee)).response!.data;
         const [nextSyncCommitteeRoot, nextSyncCommitteeBranch] = createSingleProof(createNodeFromProof(nextSyncCommitteeProof), gindex);
 
         const syncPeriod = computeSyncPeriodAtSlot(finalizedSlot);
-        const { nextSyncCommittee } = (await this.clientNode.lightclient.getCommitteeUpdates(syncPeriod, syncPeriod)).data[0];
+        const { nextSyncCommittee } = (await this.clientNode.lightclient.getUpdates(syncPeriod, 0)).response![0].data;
 
         logger.debug('roots equal: ', toHexString(nextSyncCommitteeRoot) === toHexString(ssz.altair.SyncCommittee.hashTreeRoot(nextSyncCommittee)));
 
-        const { syncCommitteeSignature, syncCommitteeBits } = ((await this.clientNode.beacon.getBlock(finalizedSlot)).data.message as altair.BeaconBlock).body.syncAggregate;
+        const { syncCommitteeSignature, syncCommitteeBits } = ((await this.clientNode.beacon.getBlock(finalizedSlot)).response!.data.message as altair.BeaconBlock).body.syncAggregate;
 
-        logger.info(
+        logger.debug(
             'nextSyncCommitteeBranch valid: ',
-            isValidMerkleBranch(
+            verifyMerkleBranch(
                 nextSyncCommitteeRoot,
                 nextSyncCommitteeBranch,
                 ...BeaconChainClient.fromGindex(BeaconChainClient.NEXT_SYNC_COMMITTEE_INDEX),
@@ -346,7 +341,7 @@ export default class BeaconChainClient {
 
     public getLatestSyncCommitteePeriod = async (): Promise<number> => {
         // TODO: could be computed w/o node interaction
-        const latestBlockHeader = (await this.clientNode.beacon.getBlockHeader('head')).data;
+        const latestBlockHeader = (await this.clientNode.beacon.getBlockHeader('head')).response!.data;
         const latestSlot = latestBlockHeader.header.message.slot;
         return computeSyncPeriodAtSlot(latestSlot);
     };

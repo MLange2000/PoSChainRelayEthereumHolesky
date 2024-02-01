@@ -2,9 +2,13 @@ import Web3 from 'web3';
 import { AbiItem } from 'web3-utils';
 import { TransactionReceipt } from 'web3-core';
 import { Contract } from 'web3-eth-contract';
+import { logger } from '../src/utils/logger.js';
+import fs from 'fs';
+import BeaconChainClient from './beaconChainClient.js';
+import data from '../../build/contracts/Eth2ChainRelay_512_NoStorage_Client.json' with { type:"json" };
 
-import BeaconChainClient from './beaconChainClient';
-import { abi, bytecode } from '../../build/contracts/Eth2ChainRelay_512_NoStorage_Client.json';
+let abi = data.abi;
+let bytecode = data.bytecode;
 
 export default class VerilayClient {
     relayContract: Contract;
@@ -20,7 +24,11 @@ export default class VerilayClient {
         _Contractaddress?: string,
     ) {
         const web3 = new Web3(_targetUrl);
-        this.senderAccount = _account;
+        const signer = web3.eth.accounts.privateKeyToAccount(
+            '0x' + _account,
+          );
+        web3.eth.accounts.wallet.add(signer);
+        this.senderAccount = signer.address;
         this.relayContract = new web3.eth.Contract(abi as AbiItem[], _Contractaddress);
         this.beaconChainClient = new BeaconChainClient(_sourceUrl);
     }
@@ -34,7 +42,8 @@ export default class VerilayClient {
         _latestSlot: number,
         _latestSlotWithValidatorSetChange: number,
     ): Promise<string> => {
-        this.relayContract = await this.relayContract.deploy({
+
+        const deploy = this.relayContract.deploy({
             data: bytecode,
             arguments: [
                 _signatureThreshold,
@@ -45,11 +54,15 @@ export default class VerilayClient {
                 _latestSlot,
                 _latestSlotWithValidatorSetChange,
             ],
-        }).send({
+        })
+        
+        const deployedContract = await deploy.send({
             from: this.senderAccount,
-            gas: 8000000,
+            gas: await deploy.estimateGas(),
         });
-        return this.relayContract.options.address;
+        this.relayContract = deployedContract;
+        this.relayContract.options.address = deployedContract.options.address;
+        return deployedContract.options.address;
     };
 
     public deployContractAtPeriod = async (
@@ -74,8 +87,8 @@ export default class VerilayClient {
         _syncCommitteePeriod: number,
     ): Promise<string> => {
         const updateData = await this.beaconChainClient.getCommitteeUpdateData(_syncCommitteePeriod);
-
-        const receipt: TransactionReceipt = await this.relayContract.methods.submitUpdate(updateData).send({ from: this.senderAccount });
+        logger.info(this.relayContract.options.address);
+        const receipt: TransactionReceipt = await this.relayContract.methods.submitUpdate(updateData).send({ from: this.senderAccount, gasLimit: 39000000, contractAddress: this.relayContract.options.address});
         return receipt.transactionHash;
     };
 
@@ -84,7 +97,7 @@ export default class VerilayClient {
     ): Promise<string> => {
         const updateData = await this.beaconChainClient.getBlockUpdateDataForEpoch(_epoch);
 
-        const receipt: TransactionReceipt = await this.relayContract.methods.submitUpdate(updateData).send({ from: this.senderAccount });
+        const receipt: TransactionReceipt = await this.relayContract.methods.submitUpdate(updateData).send({ from: this.senderAccount, gasLimit: 39000000, contractAddress: this.relayContract.options.address});
         return receipt.transactionHash;
     };
 
