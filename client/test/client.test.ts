@@ -18,7 +18,7 @@ describe('Deploy and update relay from historic state', () => {
         const web3 = new Web3(targetUrl);
         //const [account] = await web3.eth.getAccounts();
         //expect(account).to.exist;
-        verilayClient = new VerilayClient(targetUrl, sourceUrl, "c97790a0e16de2f90568fbf578cfbf04540a562bf4bff01cc76b002d64b55aea");
+        verilayClient = new VerilayClient(targetUrl, sourceUrl, "WalletPrivateKey");
     });
 
     it('should deploy the relay contract', async () => {

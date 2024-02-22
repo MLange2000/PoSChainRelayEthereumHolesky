@@ -11,8 +11,8 @@ const ALTAIR_EPOCH = 74240;
 
 describe('Deploy and update relay from historic state', () => {
     const targetUrl = 'http://localhost:8555';
-    const sourceUrl = 'http://localhost:9596';
-    let syncCommitteePeriod = -1;
+    const sourceUrl = 'https://lodestar-holesky.chainsafe.io/'; //lodestar
+    let syncCommitteePeriod = 105;
     let targetEpoch = -1;
     let relayContractAddress: string;
     let verilayClient: VerilayClient;
@@ -29,9 +29,9 @@ describe('Deploy and update relay from historic state', () => {
             logger.info('syncPeriod: ', syncCommitteePeriod, ', targetEpoch: ', targetEpoch);
             return web3.eth.getAccounts();
         }).then((accounts) => {
-            const [account] = accounts;
-            expect(account).to.exist;
-            verilayClient = new VerilayClient(targetUrl, sourceUrl, account);
+            // const [account] = accounts;
+            // expect(account).to.exist;
+            verilayClient = new VerilayClient(targetUrl, sourceUrl, "Wallet-PrivateKey");
             resolve(true);
         });
     });
