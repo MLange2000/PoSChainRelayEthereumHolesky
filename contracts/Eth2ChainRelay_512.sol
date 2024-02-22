@@ -5,9 +5,12 @@
 pragma solidity >=0.8.0 <0.9.0;
 
 import "../node_modules/solidity-bytes-utils/contracts/BytesLib.sol";
+import "./libraries/Memory.sol";
+import "./libraries/MerklePatriciaProof.sol";
+import "./libraries/RLPReader.sol";
 
 // debug settings
-bool constant MOCK_BLS_PRECOMPILE = false;
+bool constant MOCK_BLS_PRECOMPILE = true;
 
 // magic numbers
 uint constant FIRST_BEACON_BLOCK_UNIX_TIMESTAMP = 1606824023;
@@ -54,7 +57,11 @@ struct SyncCommitteeUpdate {
  * @dev Implements a chain relay/light client for eth2 consensus post-altair (including sync committees)
  */
 contract Eth2ChainRelay_512 {
+    using RLPReader for *;
     using BytesLib for bytes;
+    uint constant REQUIRED_VERIFICATION_FEE_IN_WEI = 0.1 ether;
+    uint8 constant VERIFICATION_TYPE_TX = 1;
+    uint8 constant VERIFICATION_TYPE_RECEIPT = 2;
 
     uint64 private signatureThreshold; // 0 < signatureThreshold <= 512
     uint64 private trustingPeriod; // validators are trusted for a certain time, ensuring they have not exited the validator set, in unix time
@@ -197,6 +204,100 @@ contract Eth2ChainRelay_512 {
         latestSlot = _chainRelayUpdate.latestSlot;
         finalizedSlot = _chainRelayUpdate.finalizedSlot;
         return true;
+    }
+
+    function verifyBlockSignature(bytes memory signature, bytes32 blockhash, bool[SYNC_COMMITTEE_SIZE] memory participants) public view returns (bool) {
+        uint numberOfParticipants = countTrueBools(participants);
+        require(
+            numberOfParticipants >= signatureThreshold, 
+            "not enough signature participants");
+        
+        //validator set has to be part of input?
+
+        require(fastAggregateVerify(
+            serializeAggregateSignature(blockhash, signature, getActiveValidators(currentValidatorSet, participants, numberOfParticipants))
+        ));
+
+        return true;
+
+    }
+
+    function verifyMerkleProof(bytes32 blockHash, bytes memory rlpEncodedValue,
+        bytes memory path, bytes memory rlpEncodedNodes, bytes32 merkleRootHash) internal view returns (uint8) {
+        
+        //check if header is stored
+        require(finalizedBlockRoot == blockHash, "block does not exist in current relay-state");
+
+        if (MerklePatriciaProof.verify(rlpEncodedValue, path, rlpEncodedNodes, merkleRootHash) > 0) {
+            return 1;
+        }
+
+        return 0;
+    }
+    
+    function getTxRoot(bytes memory rlpHeader) internal pure returns (bytes32) {
+        RLPReader.Iterator memory it = rlpHeader.toRlpItem().iterator();
+        uint idx;
+        while(it.hasNext()) {
+            if ( idx == 4 ) return bytes32(it.next().toUint());
+            else it.next();
+
+            idx++;
+        }
+
+        return 0;
+    }
+
+    function getReceiptsRoot(bytes memory rlpHeader) internal pure returns (bytes32) {
+        RLPReader.Iterator memory it = rlpHeader.toRlpItem().iterator();
+        uint idx;
+        while(it.hasNext()) {
+            if ( idx == 5 ) return bytes32(it.next().toUint());
+            else it.next();
+
+            idx++;
+        }
+
+        return 0;
+    }
+
+    function verify(uint8 verificationType, uint feeInWei, bytes memory rlpHeader, bytes memory rlpEncodedValue,
+        bytes memory path, bytes memory rlpEncodedNodes, bytes memory signature, bytes32 blockhash, bool[SYNC_COMMITTEE_SIZE] memory participants) private returns (uint8) {
+
+        require(feeInWei == msg.value, "transfer amount not equal to function parameter");
+        require(feeInWei >= REQUIRED_VERIFICATION_FEE_IN_WEI, "provided fee is less than expected fee");
+
+        bytes32 blockHash = keccak256(rlpHeader);
+        uint8 result;
+
+        //require transactions-block to be valid
+        require(verifyBlockSignature(signature, blockhash, participants));
+
+        //require receipt or transaction to be valid
+        if (verificationType == VERIFICATION_TYPE_TX) {
+            result = verifyMerkleProof(blockHash, rlpEncodedValue, path, rlpEncodedNodes, getTxRoot(rlpHeader));
+        } else if (verificationType == VERIFICATION_TYPE_RECEIPT) {
+            result = verifyMerkleProof(blockHash, rlpEncodedValue, path, rlpEncodedNodes, getReceiptsRoot(rlpHeader));
+        } else {
+            revert("Unknown verification type");
+        }
+
+        return result;
+    }
+
+    function verifyTransaction(uint feeInWei, bytes memory rlpHeader, bytes memory rlpEncodedTx,bytes memory path, bytes memory rlpEncodedNodes, bytes memory signature, bytes32 blockhash, bool[SYNC_COMMITTEE_SIZE] memory participants) public payable returns (uint64) {
+
+        uint8 result = verify(VERIFICATION_TYPE_TX, feeInWei, rlpHeader, rlpEncodedTx, path, rlpEncodedNodes, signature, blockhash, participants);
+
+        return result;
+    }
+
+    function verifyReceipt(uint feeInWei, bytes memory rlpHeader, bytes memory rlpEncodedReceipt,
+        bytes memory path, bytes memory rlpEncodedNodes, bytes memory signature, bytes32 blockhash, bool[SYNC_COMMITTEE_SIZE] memory participants) public payable returns (uint8) {
+        
+        uint8 result = verify(VERIFICATION_TYPE_RECEIPT, feeInWei, rlpHeader, rlpEncodedReceipt, path, rlpEncodedNodes, signature, blockhash, participants);
+
+        return result;
     }
     
     function getActiveValidators(bytes[SYNC_COMMITTEE_SIZE] memory _pubkeys, bool[SYNC_COMMITTEE_SIZE] memory _isActive, uint _numberOfActive) public pure returns (bytes[] memory) {
