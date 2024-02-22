@@ -17,3 +17,8 @@ export interface ChainRelayUpdate {
     syncCommitteeAggregate: string;
     syncCommitteeBranch: string[];
 }
+
+export interface BlockSignature {
+    sync_committee_signature: string;
+    sync_committee_bits: boolean[];
+}

@@ -12,8 +12,9 @@ import { createNodeFromProof, computeDescriptor } from '@chainsafe/persistent-me
 import { createSingleProof } from '../node_modules/@chainsafe/persistent-merkle-tree/lib/proof/single.js';
 import {Tree} from "@chainsafe/persistent-merkle-tree";
 
-import { ChainRelayUpdate} from './types.js';
+import { ChainRelayUpdate, BlockSignature} from './types.js';
 import { logger } from './utils/logger.js';
+import axios from 'axios';
 
 export default class BeaconChainClient {
     clientNode: Api;
@@ -52,6 +53,26 @@ export default class BeaconChainClient {
         }
       
         return booleanArray;
+    }
+
+    public getBlockSlot = async( 
+        _blockNumber: number
+    ): Promise<number> => {
+        const blockdata = (await this.clientNode.beacon.getBlock(_blockNumber)).response!;
+        return blockdata.data.message.slot;
+    }
+    
+    public getBlockSignature = async( 
+        _slotNumber: number,
+        _sourceUrl: string
+    ): Promise<BlockSignature> => {
+        const blockdata = (await this.clientNode.beacon.getBlock(_slotNumber)).response!;
+        //Lodestar-Api doesnt support reading of full-block, but get-request works
+        //const attestation = blockdata.data.message.body.sync_aggregate;
+        //Workaround with help of axios
+        const sync_aggregate = (await axios.get(_sourceUrl+'eth/v2/beacon/blocks/'+_slotNumber.toString())).data;
+        logger.info(sync_aggregate);
+        return {sync_committee_bits: BeaconChainClient.uint8ArrayToBooleanArray(Uint8Array.from(Buffer.from(sync_aggregate.sync_committee_bits, 'hex'))), sync_committee_signature: sync_aggregate.sync_committee_signature};
     }
     
     public getCommitteeUpdateData = async (
